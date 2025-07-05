@@ -29,7 +29,7 @@
         "logConfiguration": {
           "logDriver": "awslogs",
           "options": {
-            "awslogs-group": "/ecs/ecommerce-transformer",
+            "awslogs-group": "/ecs/ecommerce-transformer-task",
             "awslogs-region": "eu-north-1",
             "awslogs-stream-prefix": "transformer"
           }

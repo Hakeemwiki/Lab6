@@ -1,0 +1,31 @@
+{
+  "family": "ecommerce-validator-task",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "3072",
+  "taskRoleArn": "arn:aws:iam::771826808190:role/ecommerce-ecs-task-role",
+  "executionRoleArn": "arn:aws:iam::771826808190:role/ecommerce-ecs-task-execution-role",
+  "containerDefinitions": [
+    {
+      "name": "validator-container",
+      "image": "771826808190.dkr.ecr.eu-north-1.amazonaws.com/ecommerce-validator:latest",
+      "essential": true,
+      "command": ["python", "validate.py", "s3a://lab6-ecommerce-shop/incoming/orders_*.csv", "s3a://lab6-ecommerce-shop/incoming/order_items_*.csv", "5"],
+      "environment": [
+        {
+          "name": "S3_INPUT_BUCKET",
+          "value": "lab6-ecommerce-shop"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/ecommerce-validator",
+          "awslogs-region": "eu-north-1",
+          "awslogs-stream-prefix": "validator"
+        }
+      }
+    }
+  ]
+}

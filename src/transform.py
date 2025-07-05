@@ -60,3 +60,18 @@ def transform_files(orders_path, order_items_path, products_path):
     """Transform CSV files into KPIs and store in DynamoDB."""
     logger.info(f"Starting transformation with paths: {orders_path}, {order_items_path}, {products_path}")
     create_dynamodb_tables()  # Create tables on first run
+
+    # Read CSV files from S3
+    orders_df = spark.read.option("header", "true").csv(orders_path)
+    order_items_df = spark.read.option("header", "true").csv(order_items_path)
+    products_df = spark.read.option("header", "true").csv(products_path)
+
+    # Join datasets
+    joined_df = orders_df.join(order_items_df, "order_id", "left").join(products_df, order_items_df.product_id == products_df.product_id, "left")
+
+    # Category-Level KPIs
+    category_kpis = joined_df.groupBy("product_category", "order_date").agg(
+        _sum(col("order_value").cast("float")).alias("daily_revenue"),
+        avg(col("order_value").cast("float")).alias("avg_order_value"),
+        (_sum(when(col("is_returned").cast("int") == 1, 1).otherwise(0)) / _sum(1) * 100).alias("avg_return_rate")
+    ).na.fill(0)

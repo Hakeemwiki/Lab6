@@ -43,16 +43,16 @@ jobs:
       - name: Build and push validation image
         run: |
           docker build -t ecommerce-validator:latest -f Dockerfile.validation .
-          docker tag ecommerce-validator:latest 771826808190.dkr.ecr.eu-north-1.amazonaws.com/ecommerce-validator:latest
-          docker push 771826808190.dkr.ecr.eu-north-1.amazonaws.com/ecommerce-validator:latest
+          docker tag ecommerce-validator:latest ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.eu-north-1.amazonaws.com/ecommerce-validator:latest
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.eu-north-1.amazonaws.com/ecommerce-validator:latest
       - name: Build and push transformation image
         run: |
           docker build -t ecommerce-transformer:latest -f Dockerfile.transformation .
-          docker tag ecommerce-transformer:latest 771826808190.dkr.ecr.eu-north-1.amazonaws.com/ecommerce-transformer:latest
-          docker push 771826808190.dkr.ecr.eu-north-1.amazonaws.com/ecommerce-transformer:latest
+          docker tag ecommerce-transformer:latest ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.eu-north-1.amazonaws.com/ecommerce-transformer:latest
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.eu-north-1.amazonaws.com/ecommerce-transformer:latest
       - name: Update ECS Task Definitions
         run: |
           aws ecs register-task-definition --cli-input-json file://config/ecs_task_definitions.json --region eu-north-1
       - name: Deploy Step Functions State Machine
         run: |
-          aws stepfunctions update-state-machine --state-machine-arn arn:aws:states:eu-north-1:771826808190:stateMachine:ECommercePipeline --definition file://config/step_functions.json --role-arn arn:aws:iam::771826808190:role/StepFunctionsRole --region eu-north-1
+          aws stepfunctions update-state-machine --state-machine-arn arn:aws:states:eu-north-1:${{ secrets.AWS_ACCOUNT_ID }}:stateMachine:ECommercePipeline --definition file://config/step_functions.json --role-arn arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/StepFunctionsRole --region eu-north-1

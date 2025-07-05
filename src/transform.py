@@ -84,3 +84,27 @@ def transform_files(orders_path, order_items_path, products_path):
         (_sum(when(col("is_returned").cast("int") == 1, 1).otherwise(0)) / _sum(1) * 100).alias("return_rate"),
         _sum(when(col("customer_id").isNotNull(), 1).otherwise(0)).alias("unique_customers")
     ).na.fill(0)
+
+    # Write to DynamoDB (simplified; requires DynamoDB connector or custom sink)
+    dynamodb = boto3.resource('dynamodb')
+    category_table = dynamodb.Table(os.environ['CATEGORY_KPI_TABLE'])
+    order_table = dynamodb.Table(os.environ['ORDER_KPI_TABLE'])
+
+    for row in category_kpis.collect():
+        category_table.put_item(Item={
+            'category': row['product_category'],
+            'order_date': row['order_date'],
+            'daily_revenue': float(row['daily_revenue']),
+            'avg_order_value': float(row['avg_order_value']),
+            'avg_return_rate': float(row['avg_return_rate'])
+        })
+    for row in order_kpis.collect():
+        order_table.put_item(Item={
+            'order_date': row['order_date'],
+            'total_orders': int(row['total_orders']),
+            'total_revenue': float(row['total_revenue']),
+            'total_items_sold': int(row['total_items_sold']),
+            'return_rate': float(row['return_rate']),
+            'unique_customers': int(row['unique_customers'])
+        })
+        

@@ -21,7 +21,7 @@
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
-          "awslogs-group": "/ecs/ecommerce-validator",
+          "awslogs-group": "/ecs/ecommerce-validator-task",
           "awslogs-region": "eu-north-1",
           "awslogs-stream-prefix": "validator"
         }

@@ -1,19 +1,21 @@
-# Importing Libraries
 import sys
 import logging
 import os
 import boto3
-import glob
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, avg, sum as _sum, when
 from botocore.exceptions import ClientError
+from delta import configure_spark_with_delta_pip
 
 # Configure logging to stderr for CloudWatch integration
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', stream=sys.stderr)
 logger = logging.getLogger(__name__)
 
-# Initialize Spark session
-spark = SparkSession.builder.appName("ECommerceTransformation").getOrCreate()
+# Initialize Spark session with Delta Lake
+builder = SparkSession.builder.appName("ECommerceTransformation").config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension") \
+    .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog") \
+    .config("spark.databricks.delta.retentionDurationCheck.enabled", "false")
+spark = configure_spark_with_delta_pip(builder).getOrCreate()
 
 # Create DynamoDB tables with partition and sort keys
 def create_dynamodb_tables():
@@ -56,9 +58,9 @@ def create_dynamodb_tables():
                 logger.error(f"Failed to create table {table['TableName']}: {str(e)}")
                 raise
 
-# Transform data and compute KPIs
+# Transform data and compute KPIs, write to Delta table
 def transform_files(orders_path, order_items_path, products_path):
-    """Transform CSV files into KPIs and store in DynamoDB."""
+    """Transform CSV files into KPIs and store in DynamoDB and Delta table."""
     logger.info(f"Starting transformation with paths: {orders_path}, {order_items_path}, {products_path}")
     create_dynamodb_tables()  # Create tables on first run
 
@@ -69,6 +71,11 @@ def transform_files(orders_path, order_items_path, products_path):
 
     # Join datasets
     joined_df = orders_df.join(order_items_df, "order_id", "left").join(products_df, order_items_df.product_id == products_df.product_id, "left")
+
+    # Write processed data to Delta table partitioned by order_date
+    delta_path = "s3a://lab6-ecommerce-shop/processed/"
+    joined_df.write.format("delta").partitionBy("order_date").mode("append").save(delta_path)
+    logger.info(f"Processed data written to Delta table at {delta_path}")
 
     # Category-Level KPIs
     category_kpis = joined_df.groupBy("product_category", "order_date").agg(
@@ -86,7 +93,7 @@ def transform_files(orders_path, order_items_path, products_path):
         _sum(when(col("customer_id").isNotNull(), 1).otherwise(0)).alias("unique_customers")
     ).na.fill(0)
 
-    # Write to DynamoDB (simplified; requires DynamoDB connector or custom sink)
+    # Write to DynamoDB
     dynamodb = boto3.resource('dynamodb')
     category_table = dynamodb.Table(os.environ['CATEGORY_KPI_TABLE'])
     order_table = dynamodb.Table(os.environ['ORDER_KPI_TABLE'])
@@ -121,10 +128,9 @@ def transform_files(orders_path, order_items_path, products_path):
     logger.info("Transformation completed")
     spark.stop()
 
-
 if __name__ == "__main__":
     if len(sys.argv) != 4:
         logger.error("Usage: python transform.py <orders_path> <order_items_path> <products_path>")
         sys.exit(1)
     transform_files(f"s3a://lab6-ecommerce-shop/incoming/orders_*.csv", f"s3a://lab6-ecommerce-shop/incoming/order_items_*.csv", f"s3a://lab6-ecommerce-shop/incoming/products.csv")
-    sys.exit(0)    
+    sys.exit(0)

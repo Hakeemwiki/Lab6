@@ -1,0 +1,2 @@
+boto3
+pyspark==3.4.1

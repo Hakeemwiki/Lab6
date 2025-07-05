@@ -50,3 +50,22 @@ def validate_row(row, file_type):
             return False, "Invalid data type or format"
     logger.info(f"{file_type} row validated successfully: {row}")
     return True, "Valid"
+
+# Validate all files of a given type
+def validate_files(file_pattern, file_type, threshold):
+    """Validate all files matching a pattern and check for minimum count."""
+    logger.info(f"Validating {file_type} files with pattern: {file_pattern}")
+    files = glob.glob(file_pattern)
+    if file_type != 'products' and len(files) < threshold:
+        logger.warning(f"Only {len(files)} {file_type} files found, need {threshold}")
+        return False
+    with Pool() as pool:
+        for file in files:
+            with open(file, 'r') as f:
+                reader = csv.DictReader(f)
+                results = pool.map(lambda row: validate_row(row, file_type), [row for row in reader])
+                if not all(result[0] for result in results):
+                    logger.error(f"Validation failed for {file_type} file: {file}")
+                    return False
+    logger.info(f"Validation completed for {len(files)} {file_type} files")
+    return True

@@ -13,3 +13,40 @@ logger = logging.getLogger(__name__)
 
 # Define valid categories (populated from products.csv)
 VALID_CATEGORIES = set()
+
+# Validate a single row based on file type
+def validate_row(row, file_type):
+    """Validate a single row based on its file type (orders, order_items, or products)."""
+    if file_type == 'products':
+        if 'product_category' not in row or 'product_id' not in row:
+            logger.error(f"Missing required fields in products row {row}")
+            return False, "Missing required fields"
+        VALID_CATEGORIES.add(row['product_category'])
+        return True, "Valid"
+    elif file_type == 'orders':
+        required_fields = ['order_id', 'order_date', 'order_value', 'product_category', 'is_returned', 'customer_id']
+        if not all(field in row for field in required_fields):
+            logger.error(f"Missing required fields in orders row {row}")
+            return False, "Missing required fields"
+        try:
+            datetime.strptime(row['order_date'], '%Y-%m-%d')
+            float(row['order_value'])
+            int(row['is_returned'])
+        except (ValueError, KeyError) as e:
+            logger.error(f"Invalid data type or format in orders row {row}: {str(e)}")
+            return False, "Invalid data type or format"
+        if row['product_category'] not in VALID_CATEGORIES:
+            logger.error(f"Invalid category {row['product_category']} in orders row {row}")
+            return False, "Invalid category"
+    elif file_type == 'order_items':
+        required_fields = ['order_id', 'product_id', 'item_count']
+        if not all(field in row for field in required_fields):
+            logger.error(f"Missing required fields in order_items row {row}")
+            return False, "Missing required fields"
+        try:
+            int(row['item_count'])
+        except (ValueError, KeyError) as e:
+            logger.error(f"Invalid data type or format in order_items row {row}: {str(e)}")
+            return False, "Invalid data type or format"
+    logger.info(f"{file_type} row validated successfully: {row}")
+    return True, "Valid"

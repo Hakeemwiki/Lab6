@@ -1,0 +1,258 @@
+{
+    "Comment": "Orchestrates the e-commerce data pipeline: validation, transformation, and archiving with error handling and waiting.",
+    "StartAt": "CheckFileThreshold",
+    "States": {
+      "CheckFileThreshold": {
+        "Type": "Pass",
+        "InputPath": "$.input",
+        "Result": {
+          "orders_count": "$.orders_count",
+          "items_count": "$.items_count",
+          "products_count": "$.products_count"
+        },
+        "ResultPath": "$.thresholds",
+        "Next": "EvaluateThreshold"
+      },
+      "EvaluateThreshold": {
+        "Type": "Choice",
+        "Choices": [
+          {
+            "And": [
+              {
+                "Variable": "$.thresholds.orders_count",
+                "NumericGreaterThanEquals": 5
+              },
+              {
+                "Variable": "$.thresholds.items_count",
+                "NumericGreaterThanEquals": 5
+              },
+              {
+                "Variable": "$.thresholds.products_count",
+                "NumericGreaterThanEquals": 1
+              }
+            ],
+            "Next": "ValidateFiles"
+          }
+        ],
+        "Default": "WaitForFiles"
+      },
+      "WaitForFiles": {
+        "Type": "Wait",
+        "Seconds": 300,
+        "Next": "CheckFileThreshold"
+      },
+      "ValidateFiles": {
+        "Type": "Task",
+        "Resource": "arn:aws:states:::ecs:runTask.sync",
+        "Parameters": {
+          "Cluster": "ecommerce-data-pipeline-cluster",
+          "TaskDefinition": "ecommerce-validator-task",
+          "LaunchType": "FARGATE",
+          "NetworkConfiguration": {
+            "AwsvpcConfiguration": {
+              "Subnets": [
+                "subnet-0b7f371c5d05a61fd"
+              ],
+              "SecurityGroups": [
+                "sg-05ce9be02039057c5"
+              ],
+              "AssignPublicIp": "ENABLED"
+            }
+          },
+          "Overrides": {
+            "ContainerOverrides": [
+              {
+                "Name": "validator-container",
+                "Command": [
+                  "python",
+                  "validate.py",
+                  "s3a://lab6-ecommerce-shop/incoming/orders_*.csv",
+                  "s3a://lab6-ecommerce-shop/incoming/order_items_*.csv",
+                  "5"
+                ]
+              }
+            ]
+          }
+        },
+        "Retry": [
+          {
+            "ErrorEquals": [
+              "States.TaskFailed",
+              "States.Timeout"
+            ],
+            "IntervalSeconds": 30,
+            "MaxAttempts": 2,
+            "BackoffRate": 2
+          }
+        ],
+        "Catch": [
+          {
+            "ErrorEquals": [
+              "States.ALL"
+            ],
+            "Next": "LogFailure"
+          }
+        ],
+        "Next": "TransformFiles",
+        "TimeoutSeconds": 600
+      },
+      "TransformFiles": {
+        "Type": "Task",
+        "Resource": "arn:aws:states:::ecs:runTask.sync",
+        "Parameters": {
+          "Cluster": "ecommerce-data-pipeline-cluster",
+          "TaskDefinition": "ecommerce-transformer-task",
+          "LaunchType": "FARGATE",
+          "NetworkConfiguration": {
+            "AwsvpcConfiguration": {
+              "Subnets": [
+                "subnet-0b7f371c5d05a61fd"
+              ],
+              "SecurityGroups": [
+                "sg-05ce9be02039057c5"
+              ],
+              "AssignPublicIp": "ENABLED"
+            }
+          },
+          "Overrides": {
+            "ContainerOverrides": [
+              {
+                "Name": "transformer-container",
+                "Command": [
+                  "python",
+                  "transform.py",
+                  "s3a://lab6-ecommerce-shop/incoming/orders_*.csv",
+                  "s3a://lab6-ecommerce-shop/incoming/order_items_*.csv",
+                  "s3a://lab6-ecommerce-shop/incoming/products.csv"
+                ]
+              }
+            ]
+          }
+        },
+        "Retry": [
+          {
+            "ErrorEquals": [
+              "States.TaskFailed",
+              "States.Timeout"
+            ],
+            "IntervalSeconds": 60,
+            "MaxAttempts": 3,
+            "BackoffRate": 2
+          }
+        ],
+        "Catch": [
+          {
+            "ErrorEquals": [
+              "States.ALL"
+            ],
+            "Next": "RetryTransform"
+          }
+        ],
+        "Next": "ArchiveFiles",
+        "TimeoutSeconds": 1800
+      },
+      "RetryTransform": {
+        "Type": "Choice",
+        "Choices": [
+          {
+            "Variable": "$.TransformFiles.Retries",
+            "NumericLessThan": 3,
+            "Next": "TransformFiles"
+          }
+        ],
+        "Default": "LogFailure"
+      },
+      "ArchiveFiles": {
+        "Type": "Task",
+        "Resource": "arn:aws:states:::aws-sdk:s3:copyObject",
+        "Parameters": {
+          "Bucket": "lab6-ecommerce-shop",
+          "CopySource": "lab6-ecommerce-shop/incoming/",
+          "Key": "archive/${$.execution.startTime}/"
+        },
+        "Retry": [
+          {
+            "ErrorEquals": [
+              "States.TaskFailed"
+            ],
+            "IntervalSeconds": 30,
+            "MaxAttempts": 2,
+            "BackoffRate": 2
+          }
+        ],
+        "Catch": [
+          {
+            "ErrorEquals": [
+              "States.ALL"
+            ],
+            "Next": "LogFailure"
+          }
+        ],
+        "Next": "ResetLock",
+        "TimeoutSeconds": 300
+      },
+      "ResetLock": {
+        "Type": "Task",
+        "Resource": "arn:aws:states:::aws-sdk:dynamodb:updateItem",
+        "Parameters": {
+          "TableName": "PipelineLock",
+          "Key": {
+            "id": {
+              "S": "pipeline"
+            }
+          },
+          "UpdateExpression": "SET #s = :val",
+          "ExpressionAttributeNames": {
+            "#s": "status"
+          },
+          "ExpressionAttributeValues": {
+            ":val": {
+              "S": "IDLE"
+            }
+          }
+        },
+        "Retry": [
+          {
+            "ErrorEquals": [
+              "States.TaskFailed"
+            ],
+            "IntervalSeconds": 10,
+            "MaxAttempts": 2,
+            "BackoffRate": 2
+          }
+        ],
+        "Catch": [
+          {
+            "ErrorEquals": [
+              "States.ALL"
+            ],
+            "Next": "LogFailure"
+          }
+        ],
+        "Next": "Success"
+      },
+      "LogFailure": {
+        "Type": "Task",
+        "Resource": "arn:aws:states:::aws-sdk:cloudwatch:putMetricAlarm",
+        "Parameters": {
+          "AlarmName": "ECommercePipelineFailure",
+          "MetricName": "PipelineFailure",
+          "Namespace": "ECommerce",
+          "Statistic": "Sum",
+          "Period": 300,
+          "EvaluationPeriods": 1,
+          "Threshold": 1,
+          "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+          "ActionsEnabled": true,
+          "AlarmDescription": "Triggered when the e-commerce pipeline fails",
+          "AlarmActions": [
+            "arn:aws:sns:eu-north-1:771826808190:PipelineAlerts"
+          ]
+        },
+        "End": true
+      },
+      "Success": {
+        "Type": "Succeed"
+      }
+    }
+  }

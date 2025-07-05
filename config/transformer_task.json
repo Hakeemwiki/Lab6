@@ -1,0 +1,39 @@
+{
+    "family": "ecommerce-transformer-task",
+    "networkMode": "awsvpc",
+    "requiresCompatibilities": ["FARGATE"],
+    "cpu": "1024",
+    "memory": "3072",
+    "taskRoleArn": "arn:aws:iam::771826808190:role/ecommerce-ecs-task-role",
+    "executionRoleArn": "arn:aws:iam::771826808190:role/ecommerce-ecs-task-execution-role",
+    "containerDefinitions": [
+      {
+        "name": "transformer-container",
+        "image": "771826808190.dkr.ecr.eu-north-1.amazonaws.com/ecommerce-transformer:latest",
+        "essential": true,
+        "command": ["python", "transform.py", "s3a://lab6-ecommerce-shop/incoming/orders_*.csv", "s3a://lab6-ecommerce-shop/incoming/order_items_*.csv", "s3a://lab6-ecommerce-shop/incoming/products.csv"],
+        "environment": [
+          {
+            "name": "CATEGORY_KPI_TABLE",
+            "value": "CategoryLevelKPIs"
+          },
+          {
+            "name": "ORDER_KPI_TABLE",
+            "value": "OrderLevelKPIs"
+          },
+          {
+            "name": "S3_ARCHIVE_BUCKET",
+            "value": "lab6-ecommerce-shop/archive"
+          }
+        ],
+        "logConfiguration": {
+          "logDriver": "awslogs",
+          "options": {
+            "awslogs-group": "/ecs/ecommerce-transformer",
+            "awslogs-region": "eu-north-1",
+            "awslogs-stream-prefix": "transformer"
+          }
+        }
+      }
+    ]
+  }

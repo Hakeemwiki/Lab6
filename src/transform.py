@@ -54,3 +54,9 @@ def create_dynamodb_tables():
             else:
                 logger.error(f"Failed to create table {table['TableName']}: {str(e)}")
                 raise
+
+# Transform data and compute KPIs
+def transform_files(orders_path, order_items_path, products_path):
+    """Transform CSV files into KPIs and store in DynamoDB."""
+    logger.info(f"Starting transformation with paths: {orders_path}, {order_items_path}, {products_path}")
+    create_dynamodb_tables()  # Create tables on first run

@@ -75,3 +75,12 @@ def transform_files(orders_path, order_items_path, products_path):
         avg(col("order_value").cast("float")).alias("avg_order_value"),
         (_sum(when(col("is_returned").cast("int") == 1, 1).otherwise(0)) / _sum(1) * 100).alias("avg_return_rate")
     ).na.fill(0)
+
+    # Order-Level KPIs
+    order_kpis = joined_df.groupBy("order_date").agg(
+        _sum(1).alias("total_orders"),
+        _sum(col("order_value").cast("float")).alias("total_revenue"),
+        _sum(col("item_count").cast("int")).alias("total_items_sold"),
+        (_sum(when(col("is_returned").cast("int") == 1, 1).otherwise(0)) / _sum(1) * 100).alias("return_rate"),
+        _sum(when(col("customer_id").isNotNull(), 1).otherwise(0)).alias("unique_customers")
+    ).na.fill(0)

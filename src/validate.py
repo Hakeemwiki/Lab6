@@ -69,3 +69,21 @@ def validate_files(file_pattern, file_type, threshold):
                     return False
     logger.info(f"Validation completed for {len(files)} {file_type} files")
     return True
+
+if __name__ == "__main__":
+    if len(sys.argv) != 4:
+        logger.error("Usage: python validate.py <orders_pattern> <order_items_pattern> <threshold>")
+        sys.exit(1)
+    orders_pattern, order_items_pattern, threshold = sys.argv[1], sys.argv[2], int(sys.argv[3])
+    input_bucket = os.environ.get('S3_INPUT_BUCKET', 'lab6-ecommerce-shop')
+    # Validate products first to build category set
+    if not validate_files(f"{input_bucket}/incoming/products.csv", 'products', 1):
+        logger.error("Products validation failed")
+        sys.exit(1)
+    # Validate orders and order_items, ensuring threshold
+    if not (validate_files(f"{input_bucket}/incoming/orders_*.csv", 'orders', threshold) and
+            validate_files(f"{input_bucket}/incoming/order_items_*.csv", 'order_items', threshold)):
+        logger.error("Orders or order_items validation failed or threshold not met")
+        sys.exit(1)
+    logger.info("All validations succeeded")
+    sys.exit(0)

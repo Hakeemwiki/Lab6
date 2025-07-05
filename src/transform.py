@@ -3,6 +3,7 @@ import sys
 import logging
 import os
 import boto3
+import glob
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, avg, sum as _sum, when
 from botocore.exceptions import ClientError
@@ -107,4 +108,23 @@ def transform_files(orders_path, order_items_path, products_path):
             'return_rate': float(row['return_rate']),
             'unique_customers': int(row['unique_customers'])
         })
-        
+
+    # Archive files
+    s3 = boto3.client('s3')
+    archive_bucket = os.environ['S3_ARCHIVE_BUCKET']
+    for path in [orders_path, order_items_path]:
+        for file in glob.glob(path):
+            key = file.replace(f"{os.environ.get('S3_INPUT_BUCKET', 'lab6-ecommerce-shop')}/incoming/", "")
+            s3.copy_object(Bucket=archive_bucket, Key=f"archive/{key}", CopySource={'Bucket': 'lab6-ecommerce-shop', 'Key': file})
+            s3.delete_object(Bucket='lab6-ecommerce-shop', Key=file)
+    logger.info(f"Archived files to {archive_bucket}")
+    logger.info("Transformation completed")
+    spark.stop()
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 4:
+        logger.error("Usage: python transform.py <orders_path> <order_items_path> <products_path>")
+        sys.exit(1)
+    transform_files(f"s3a://lab6-ecommerce-shop/incoming/orders_*.csv", f"s3a://lab6-ecommerce-shop/incoming/order_items_*.csv", f"s3a://lab6-ecommerce-shop/incoming/products.csv")
+    sys.exit(0)    

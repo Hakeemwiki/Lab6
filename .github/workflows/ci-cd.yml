@@ -42,14 +42,14 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v1
       - name: Build and push validation image
         run: |
-          docker build -t lab6-ecommerce-pipeline/validation-image:latest -f Dockerfile.validation .
-          docker tag lab6-ecommerce-pipeline/validation-image:latest 771826808190.dkr.ecr.eu-north-1.amazonaws.com/lab6-ecommerce-pipeline/validation-image:latest
-          docker push 771826808190.dkr.ecr.eu-north-1.amazonaws.com/lab6-ecommerce-pipeline/validation-image:latest
+          docker build -t ecommerce-validator:latest -f Dockerfile.validation .
+          docker tag ecommerce-validator:latest 771826808190.dkr.ecr.eu-north-1.amazonaws.com/ecommerce-validator:latest
+          docker push 771826808190.dkr.ecr.eu-north-1.amazonaws.com/ecommerce-validator:latest
       - name: Build and push transformation image
         run: |
-          docker build -t lab6-ecommerce-pipeline/transformation-image:latest -f Dockerfile.transformation .
-          docker tag lab6-ecommerce-pipeline/transformation-image:latest 771826808190.dkr.ecr.eu-north-1.amazonaws.com/lab6-ecommerce-pipeline/transformation-image:latest
-          docker push 771826808190.dkr.ecr.eu-north-1.amazonaws.com/lab6-ecommerce-pipeline/transformation-image:latest
+          docker build -t ecommerce-transformer:latest -f Dockerfile.transformation .
+          docker tag ecommerce-transformer:latest 771826808190.dkr.ecr.eu-north-1.amazonaws.com/ecommerce-transformer:latest
+          docker push 771826808190.dkr.ecr.eu-north-1.amazonaws.com/ecommerce-transformer:latest
       - name: Update ECS Task Definitions
         run: |
           aws ecs register-task-definition --cli-input-json file://config/ecs_task_definitions.json --region eu-north-1

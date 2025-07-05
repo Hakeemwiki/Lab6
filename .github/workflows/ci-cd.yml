@@ -40,6 +40,10 @@ jobs:
       - name: Log in to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
+      - name: Debug ECR URI
+        run: |
+          echo "ECR URI for validation: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.eu-north-1.amazonaws.com/ecommerce-validator:latest"
+          echo "ECR URI for transformation: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.eu-north-1.amazonaws.com/ecommerce-transformer:latest"
       - name: Build and push validation image
         run: |
           docker build -t ecommerce-validator:latest -f Dockerfile.validation .

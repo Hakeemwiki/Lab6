@@ -56,7 +56,8 @@ jobs:
           docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.eu-north-1.amazonaws.com/ecommerce-transformer:latest
       - name: Update ECS Task Definitions
         run: |
-          aws ecs register-task-definition --cli-input-json file://config/ecs_task_definitions.json --region eu-north-1
+          aws ecs register-task-definition --cli-input-json file://config/validator_task.json --region eu-north-1
+          aws ecs register-task-definition --cli-input-json file://config/transformer_task.json --region eu-north-1
       - name: Deploy Step Functions State Machine
         run: |
           aws stepfunctions update-state-machine --state-machine-arn arn:aws:states:eu-north-1:${{ secrets.AWS_ACCOUNT_ID }}:stateMachine:ECommercePipeline --definition file://config/step_functions.json --role-arn arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/StepFunctionsRole --region eu-north-1

@@ -6,8 +6,9 @@ from datetime import datetime
 from urllib.parse import urlparse
 from decimal import Decimal
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, avg, sum as _sum, when, count, countDistinct, to_date
+from pyspark.sql.functions import col, avg, sum as _sum, when, count, countDistinct, to_date, row_number
 from pyspark.sql.types import IntegerType, FloatType
+from pyspark.sql.window import Window
 from botocore.exceptions import ClientError
 from delta import configure_spark_with_delta_pip
 
@@ -155,26 +156,29 @@ def transform_files(orders_path, order_items_path, products_path):
 
         from delta.tables import DeltaTable
 
+        window_spec = Window.partitionBy("order_id", "product_id").orderBy(col("item_created_at").desc())
+        deduped_df = joined_df.withColumn("rn", row_number().over(window_spec)).filter(col("rn") == 1).drop("rn")
+
         if DeltaTable.isDeltaTable(spark, delta_path):
             delta_table = DeltaTable.forPath(spark, delta_path)
             delta_table.alias("target").merge(
-                joined_df.alias("source"),
+                deduped_df.alias("source"),
                 "target.order_id = source.order_id AND target.product_id = source.product_id"
             ).whenMatchedUpdateAll().whenNotMatchedInsertAll().execute()
         else:
-            joined_df.write.format("delta").partitionBy("order_date").mode("overwrite").save(delta_path)
+            deduped_df.write.format("delta").partitionBy("order_date").mode("overwrite").save(delta_path)
 
         logger.info("Processed data written to Delta table")
 
         logger.info("Computing category-level KPIs...")
-        category_kpis = joined_df.groupBy("category", "order_date").agg(
+        category_kpis = deduped_df.groupBy("category", "order_date").agg(
             _sum("sale_price").alias("daily_revenue"),
             avg("sale_price").alias("avg_order_value"),
             (avg(when(col("is_returned") == 1, 1.0).otherwise(0.0)) * 100).alias("avg_return_rate")
         ).na.fill(0)
 
         logger.info("Computing order-level KPIs...")
-        order_kpis = joined_df.groupBy("order_date").agg(
+        order_kpis = deduped_df.groupBy("order_date").agg(
             countDistinct("order_id").alias("total_orders"),
             _sum("sale_price").alias("total_revenue"),
             _sum("num_of_item").alias("total_items_sold"),

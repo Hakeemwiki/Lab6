@@ -29,4 +29,4 @@ COPY src/transformation/transform.py .
 ENV SPARK_LOCAL_IP=127.0.0.1
 
 # Default command (can be overridden by ECS)
-CMD ["spark-submit", "--master", "local[*]", "transform.py"]
+CMD ["spark-submit", "--conf", "spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension","--conf", "spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog","transform.py"]

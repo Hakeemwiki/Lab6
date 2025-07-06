@@ -27,4 +27,4 @@ ENV SPARK_LOCAL_IP=127.0.0.1
 # USER ${SPARK_USER:-spark}  # Uncomment and adjust if needed
 
 # Command to run the script
-ENTRYPOINT ["python3", "transform.py"]
+CMD ["python3", "transform.py"]

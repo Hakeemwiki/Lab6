@@ -156,47 +156,70 @@ def get_s3_files(bucket_name, prefix, pattern):
 def validate_row(row, file_type, valid_categories=None):
     """Validate a single row based on file type."""
     if file_type == 'products':
-        # Check required fields and non-empty values
-        required_fields = ['product_id', 'product_category']
+        # Check required fields and non-empty values (based on actual schema)
+        required_fields = ['id', 'sku', 'cost', 'category', 'name', 'brand', 'retail_price', 'department']
         if not all(field in row and row[field].strip() for field in required_fields):
             logger.warning(f"Invalid products row - missing or empty required fields: {row}")
             return False
+        
+        # Validate data types
+        try:
+            float(row['cost'])
+            float(row['retail_price'])
+            int(row['id'])
+        except ValueError as e:
+            logger.warning(f"Invalid products row - data type error: {row}, error: {e}")
+            return False
+            
         return True
         
     elif file_type == 'orders':
-        # Check required fields and non-empty values
-        required_fields = ['order_id', 'order_date', 'order_value', 'product_category', 'is_returned', 'customer_id']
+        # Check required fields and non-empty values (based on actual schema)
+        required_fields = ['order_id', 'user_id', 'status', 'created_at', 'num_of_item']
         if not all(field in row and row[field].strip() for field in required_fields):
             logger.warning(f"Invalid orders row - missing or empty required fields: {row}")
             return False
         
         # Validate data types
         try:
-            float(row['order_value'])
-            int(row['is_returned'])
+            int(row['order_id'])
+            int(row['user_id'])
+            int(row['num_of_item'])
         except ValueError as e:
             logger.warning(f"Invalid orders row - data type error: {row}, error: {e}")
             return False
             
-        # Validate category if provided
-        if valid_categories and row['product_category'] not in valid_categories:
-            logger.warning(f"Invalid orders row - unknown category: {row['product_category']}")
+        # Validate status
+        valid_statuses = ['delivered', 'returned', 'shipped', 'cancelled']
+        if row['status'] not in valid_statuses:
+            logger.warning(f"Invalid orders row - unknown status: {row['status']}")
             return False
             
         return True
         
     elif file_type == 'order_items':
-        # Check required fields and non-empty values
-        required_fields = ['order_id', 'product_id', 'item_count']
+        # Check required fields and non-empty values (based on actual schema)
+        required_fields = ['order_id', 'product_id', 'user_id', 'status', 'sale_price']
         if not all(field in row and row[field].strip() for field in required_fields):
             logger.warning(f"Invalid order_items row - missing or empty required fields: {row}")
             return False
         
         # Validate data types
         try:
-            int(row['item_count'])
+            # Validate sale_price is numeric
+            float(row['sale_price'])
+            # Validate IDs are numeric
+            int(row['order_id'])
+            int(row['product_id'])
+            int(row['user_id'])
         except ValueError as e:
             logger.warning(f"Invalid order_items row - data type error: {row}, error: {e}")
+            return False
+            
+        # Validate status
+        valid_statuses = ['delivered', 'returned', 'shipped', 'cancelled']
+        if row['status'] not in valid_statuses:
+            logger.warning(f"Invalid order_items row - unknown status: {row['status']}")
             return False
             
         return True
@@ -235,7 +258,7 @@ def validate_files(bucket_name, prefix, pattern, file_type, threshold, valid_cat
                     if validate_row(row, file_type, valid_categories):
                         valid_file_rows += 1
                         if file_type == 'products':
-                            categories_found.add(row['product_category'])
+                            categories_found.add(row['category'])  # Updated field name
                     else:
                         logger.warning(f"Invalid row {row_count} in {file_path}")
                 

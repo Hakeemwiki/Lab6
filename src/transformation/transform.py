@@ -15,7 +15,6 @@ logger = logging.getLogger(__name__)
 def create_spark_session():
     """Create Spark session with Delta Lake support."""
     try:
-        # Initialize Spark session with Delta Lake
         builder = SparkSession.builder \
             .appName("ECommerceTransformation") \
             .config("spark.master", "local[*]") \
@@ -29,16 +28,12 @@ def create_spark_session():
             .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \
             .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
             .config("spark.hadoop.fs.s3a.aws.credentials.provider", "com.amazonaws.auth.DefaultAWSCredentialsProviderChain")
-        
-        # Use configure_spark_with_delta_pip since you have full Spark installation
+
         spark = configure_spark_with_delta_pip(builder).getOrCreate()
-        
-        # Set log level to reduce noise
         spark.sparkContext.setLogLevel("WARN")
-        
         logger.info("Spark session created successfully")
         return spark
-        
+
     except Exception as e:
         logger.error(f"Failed to create Spark session: {str(e)}")
         raise
@@ -70,7 +65,7 @@ def create_dynamodb_tables():
             'BillingMode': 'PAY_PER_REQUEST'
         }
     ]
-    
+
     for table in tables:
         try:
             dynamodb_client.create_table(**table)
@@ -87,83 +82,72 @@ def create_dynamodb_tables():
 def transform_files(orders_path, order_items_path, products_path):
     """Transform CSV files into KPIs and store in DynamoDB and Delta table."""
     logger.info(f"Starting transformation with paths: {orders_path}, {order_items_path}, {products_path}")
-    
     spark = None
     try:
         spark = create_spark_session()
         create_dynamodb_tables()
-        
-        # Read CSV files from S3 with proper schema inference
+
+        # Read CSV files from S3
         logger.info("Reading CSV files from S3...")
-        
-        # Read orders - based on actual schema
+
         orders_df = spark.read.option("header", "true").option("inferSchema", "true").csv(orders_path)
         logger.info(f"Orders schema: {orders_df.columns}")
-        
-        # Read order_items - based on actual schema  
+
         order_items_df = spark.read.option("header", "true").option("inferSchema", "true").csv(order_items_path)
         logger.info(f"Order items schema: {order_items_df.columns}")
-        
-        # Read products - based on actual schema
+
         products_df = spark.read.option("header", "true").option("inferSchema", "true").csv(products_path)
         logger.info(f"Products schema: {products_df.columns}")
-        
-        # Data cleaning and type casting
+
+        # Cast types and rename conflicting columns
         orders_df = orders_df.withColumn("order_id", col("order_id").cast(IntegerType())) \
-                            .withColumn("user_id", col("user_id").cast(IntegerType())) \
-                            .withColumn("num_of_item", col("num_of_item").cast(IntegerType())) \
-                            .withColumn("order_date", to_date(col("created_at"), "yyyy-MM-dd'T'HH:mm:ss"))
-        
+                             .withColumn("user_id", col("user_id").cast(IntegerType())) \
+                             .withColumn("num_of_item", col("num_of_item").cast(IntegerType())) \
+                             .withColumn("order_date", to_date(col("created_at"), "yyyy-MM-dd'T'HH:mm:ss")) \
+                             .withColumnRenamed("status", "order_status")
+
         order_items_df = order_items_df.withColumn("order_id", col("order_id").cast(IntegerType())) \
-                                      .withColumn("product_id", col("product_id").cast(IntegerType())) \
-                                      .withColumn("user_id", col("user_id").cast(IntegerType())) \
-                                      .withColumn("sale_price", col("sale_price").cast(FloatType()))
-        
+                                       .withColumn("product_id", col("product_id").cast(IntegerType())) \
+                                       .withColumn("user_id", col("user_id").cast(IntegerType())) \
+                                       .withColumn("sale_price", col("sale_price").cast(FloatType())) \
+                                       .withColumnRenamed("status", "item_status")
+
         products_df = products_df.withColumn("id", col("id").cast(IntegerType())) \
-                                .withColumn("cost", col("cost").cast(FloatType())) \
-                                .withColumn("retail_price", col("retail_price").cast(FloatType()))
-        
+                                 .withColumn("cost", col("cost").cast(FloatType())) \
+                                 .withColumn("retail_price", col("retail_price").cast(FloatType()))
+
         # Join datasets
         logger.info("Joining datasets...")
-        
-        # First join orders with order_items
         orders_items_df = orders_df.join(order_items_df, "order_id", "inner")
-        
-        # Then join with products
-        joined_df = orders_items_df.join(products_df, 
-                                        order_items_df.product_id == products_df.id, 
-                                        "left")
-        
+        joined_df = orders_items_df.join(products_df, orders_items_df.product_id == products_df.id, "left")
+
         # Add calculated fields
-        joined_df = joined_df.withColumn("is_returned", 
-                                       when(col("status") == "returned", 1).otherwise(0)) \
-                           .withColumn("order_value", col("sale_price"))
-        
+        joined_df = joined_df.withColumn("is_returned", when(col("order_status") == "returned", 1).otherwise(0)) \
+                             .withColumn("order_value", col("sale_price"))
+
         logger.info(f"Joined dataset has {joined_df.count()} rows")
-        
-        # Write processed data to Delta table partitioned by order_date
+
+        # Write to Delta table
         delta_path = f"s3a://{os.environ.get('S3_INPUT_BUCKET', 'lab6-ecommerce-shop')}/processed/"
         logger.info(f"Writing to Delta table at {delta_path}")
-        
+
         joined_df.write.format("delta") \
-                .partitionBy("order_date") \
-                .mode("append") \
-                .save(delta_path)
-        
+            .partitionBy("order_date") \
+            .mode("append") \
+            .save(delta_path)
+
         logger.info("Processed data written to Delta table")
-        
-        # Category-Level KPIs (Per Category, Per Day)
+
+        # Category-level KPIs
         logger.info("Computing category-level KPIs...")
-        
         category_kpis = joined_df.groupBy("category", "order_date").agg(
             _sum("sale_price").alias("daily_revenue"),
             avg("sale_price").alias("avg_order_value"),
             (avg(when(col("is_returned") == 1, 1.0).otherwise(0.0)) * 100).alias("avg_return_rate")
         ).na.fill(0)
-        
-        # Order-Level KPIs (Per Day)
+
+        # Order-level KPIs
         logger.info("Computing order-level KPIs...")
-        
         order_kpis = joined_df.groupBy("order_date").agg(
             countDistinct("order_id").alias("total_orders"),
             _sum("sale_price").alias("total_revenue"),
@@ -171,19 +155,15 @@ def transform_files(orders_path, order_items_path, products_path):
             (avg(when(col("is_returned") == 1, 1.0).otherwise(0.0)) * 100).alias("return_rate"),
             countDistinct("user_id").alias("unique_customers")
         ).na.fill(0)
-        
+
         # Write to DynamoDB
         logger.info("Writing KPIs to DynamoDB...")
-        
         dynamodb = boto3.resource('dynamodb')
         category_table = dynamodb.Table(os.environ['CATEGORY_KPI_TABLE'])
         order_table = dynamodb.Table(os.environ['ORDER_KPI_TABLE'])
-        
-        # Write category KPIs
-        category_data = category_kpis.collect()
-        logger.info(f"Writing {len(category_data)} category KPI records...")
-        
-        for row in category_data:
+
+        logger.info(f"Writing {len(category_kpis.collect())} category KPI records...")
+        for row in category_kpis.collect():
             try:
                 category_table.put_item(Item={
                     'category': str(row['category']) if row['category'] else 'unknown',
@@ -194,12 +174,9 @@ def transform_files(orders_path, order_items_path, products_path):
                 })
             except Exception as e:
                 logger.error(f"Failed to write category KPI: {row}, error: {e}")
-        
-        # Write order KPIs
-        order_data = order_kpis.collect()
-        logger.info(f"Writing {len(order_data)} order KPI records...")
-        
-        for row in order_data:
+
+        logger.info(f"Writing {len(order_kpis.collect())} order KPI records...")
+        for row in order_kpis.collect():
             try:
                 order_table.put_item(Item={
                     'order_date': str(row['order_date']),
@@ -211,13 +188,14 @@ def transform_files(orders_path, order_items_path, products_path):
                 })
             except Exception as e:
                 logger.error(f"Failed to write order KPI: {row}, error: {e}")
-        
+
         logger.info("KPIs written to DynamoDB successfully")
         logger.info("Transformation completed successfully")
-        
+
     except Exception as e:
         logger.error(f"Transformation failed: {str(e)}")
         raise
+
     finally:
         if spark:
             spark.stop()
@@ -226,16 +204,15 @@ if __name__ == "__main__":
     if len(sys.argv) != 4:
         logger.error("Usage: python transform.py <orders_path> <order_items_path> <products_path>")
         sys.exit(1)
-    
-    # Use command line arguments
+
     orders_path = sys.argv[1]
     order_items_path = sys.argv[2]
     products_path = sys.argv[3]
-    
-    logger.info(f"Processing files:")
+
+    logger.info("Processing files:")
     logger.info(f"Orders: {orders_path}")
     logger.info(f"Order Items: {order_items_path}")
     logger.info(f"Products: {products_path}")
-    
+
     transform_files(orders_path, order_items_path, products_path)
     sys.exit(0)

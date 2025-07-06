@@ -4,6 +4,7 @@ import os
 import boto3
 from datetime import datetime
 from urllib.parse import urlparse
+from decimal import Decimal
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, avg, sum as _sum, when, count, countDistinct, to_date
 from pyspark.sql.types import IntegerType, FloatType
@@ -150,12 +151,18 @@ def transform_files(orders_path, order_items_path, products_path):
         logger.info(f"Joined dataset has {joined_df.count()} rows")
 
         delta_path = f"s3a://{os.environ.get('S3_INPUT_BUCKET', 'lab6-ecommerce-shop')}/processed/"
-        logger.info(f"Writing to Delta table at {delta_path}")
+        logger.info(f"Writing to Delta table at {delta_path} using MERGE")
 
-        joined_df.write.format("delta") \
-            .partitionBy("order_date") \
-            .mode("append") \
-            .save(delta_path)
+        from delta.tables import DeltaTable
+
+        if DeltaTable.isDeltaTable(spark, delta_path):
+            delta_table = DeltaTable.forPath(spark, delta_path)
+            delta_table.alias("target").merge(
+                joined_df.alias("source"),
+                "target.order_id = source.order_id AND target.product_id = source.product_id"
+            ).whenMatchedUpdateAll().whenNotMatchedInsertAll().execute()
+        else:
+            joined_df.write.format("delta").partitionBy("order_date").mode("overwrite").save(delta_path)
 
         logger.info("Processed data written to Delta table")
 
@@ -188,9 +195,9 @@ def transform_files(orders_path, order_items_path, products_path):
                 category_table.put_item(Item={
                     'category': str(row['category']) if row['category'] else 'unknown',
                     'order_date': str(row['order_date']),
-                    'daily_revenue': float(row['daily_revenue']),
-                    'avg_order_value': float(row['avg_order_value']),
-                    'avg_return_rate': float(row['avg_return_rate'])
+                    'daily_revenue': Decimal(str(row['daily_revenue'])),
+                    'avg_order_value': Decimal(str(row['avg_order_value'])),
+                    'avg_return_rate': Decimal(str(row['avg_return_rate']))
                 })
             except Exception as e:
                 logger.error(f"Failed to write category KPI: {row}, error: {e}")
@@ -200,9 +207,9 @@ def transform_files(orders_path, order_items_path, products_path):
                 order_table.put_item(Item={
                     'order_date': str(row['order_date']),
                     'total_orders': int(row['total_orders']),
-                    'total_revenue': float(row['total_revenue']),
+                    'total_revenue': Decimal(str(row['total_revenue'])),
                     'total_items_sold': int(row['total_items_sold']),
-                    'return_rate': float(row['return_rate']),
+                    'return_rate': Decimal(str(row['return_rate'])),
                     'unique_customers': int(row['unique_customers'])
                 })
             except Exception as e:

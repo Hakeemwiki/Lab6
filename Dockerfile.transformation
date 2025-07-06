@@ -1,12 +1,44 @@
 FROM python:3.9-slim
+
+# Install Java (required for Spark) and other dependencies
+RUN apt-get update && apt-get install -y \
+    openjdk-17-jre-headless \
+    curl \
+    procps \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
 WORKDIR /app
-# Install Java and PySpark dependencies
-RUN apt-get update && apt-get install -y openjdk-17-jre-headless && \
-    apt-get clean && rm -rf /var/lib/apt/lists/* && \
-    pip install --no-cache-dir pyspark boto3 delta-spark
+
+# Download and install Spark
+ARG SPARK_VERSION=3.4.1
+RUN curl -L -o spark.tgz https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop3.tgz && \
+    tar -xzf spark.tgz -C /usr/local/ && \
+    rm spark.tgz && \
+    ln -s /usr/local/spark-${SPARK_VERSION}-bin-hadoop3 /usr/local/spark
+
+# Copy requirements and install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy transformation script
 COPY src/transformation/transform.py .
+
+# Set environment variables
 ENV SPARK_HOME=/usr/local/spark
-ENV PATH=$PATH:$SPARK_HOME/bin
-CMD ["python", "transform.py", "s3a://lab6-ecommerce-shop/incoming/orders_*.csv", "s3a://lab6-ecommerce-shop/incoming/order_items_*.csv", "s3a://lab6-ecommerce-shop/incoming/products.csv"]
+ENV PATH=$PATH:$SPARK_HOME/bin:$SPARK_HOME/sbin
+ENV PYSPARK_PYTHON=python3
+ENV PYSPARK_DRIVER_PYTHON=python3
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+
+# Set Spark configuration for containerized environment
+ENV SPARK_CONF_DIR=$SPARK_HOME/conf
+ENV SPARK_LOCAL_IP=127.0.0.1
+
+# Create spark user (optional but recommended for production)
+# RUN useradd -r -s /bin/false spark && \
+#     chown -R spark:spark $SPARK_HOME && \
+#     chown -R spark:spark /app
+
+# Command to run the script (made more flexible)
+ENTRYPOINT ["python", "transform.py"]

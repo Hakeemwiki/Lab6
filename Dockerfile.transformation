@@ -1,32 +1,29 @@
-# Base Spark + Python image
-FROM apache/spark-py
+FROM apache/spark-py:3.4.1
 
-# Use root for installs
 USER root
 
-# Install required packages and create python symlink
+# Install essential packages and create python symlink
 RUN apt-get update && apt-get install -y \
-    curl \
-    procps \
+    curl procps \
     && ln -s /usr/bin/python3 /usr/bin/python \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
 WORKDIR /app
 
 # Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Add required JARs for S3 support (based on Hadoop 3.3.2)
+# ✅ Add both required Delta JARs (core + catalog support)
+ADD https://repo1.maven.org/maven2/io/delta/delta-core_2.12/2.4.0/delta-core_2.12-2.4.0.jar /opt/spark/jars/
+ADD https://repo1.maven.org/maven2/io/delta/delta-spark_2.12/2.4.0/delta-spark_2.12-2.4.0.jar /opt/spark/jars/
+
+# ✅ Add Hadoop AWS JARs for S3 access
 ADD https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.2/hadoop-aws-3.3.2.jar /opt/spark/jars/
 ADD https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.11.1026/aws-java-sdk-bundle-1.11.1026.jar /opt/spark/jars/
 
-# Copy transformation script
+# Copy your PySpark transformation script
 COPY src/transformation/transform.py .
 
-# Optional: Set env for Spark local
-ENV SPARK_LOCAL_IP=127.0.0.1
-
-# Default command (can be overridden by ECS)
-CMD ["spark-submit", "--conf", "spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension","--conf", "spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog","transform.py"]
+# Run using spark-submit with Delta Lake config
+CMD ["spark-submit","--conf", "spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension","--conf", "spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog","transform.py","s3a://lab6-ecommerce-shop/incoming/orders_*.csv","s3a://lab6-ecommerce-shop/incoming/order_items_*.csv","s3a://lab6-ecommerce-shop/incoming/products.csv"]

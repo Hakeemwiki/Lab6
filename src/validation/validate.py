@@ -156,11 +156,22 @@ def get_s3_files(bucket_name, prefix, pattern):
 def validate_row(row, file_type, valid_categories=None):
     """Validate a single row based on file type."""
     if file_type == 'products':
-        # Check required fields and non-empty values (based on actual schema)
-        required_fields = ['id', 'sku', 'cost', 'category', 'name', 'brand', 'retail_price', 'department']
-        if not all(field in row and row[field].strip() for field in required_fields):
-            logger.warning(f"Invalid products row - missing or empty required fields: {row}")
-            return False
+        # Required fields that must be present and non-empty
+        required_fields = ['id', 'sku', 'cost', 'category', 'name', 'retail_price', 'department']
+        # Optional fields that can be empty
+        optional_fields = ['brand']
+        
+        # Check that all required fields are present and non-empty
+        for field in required_fields:
+            if field not in row or not row[field].strip():
+                logger.warning(f"Invalid products row - missing or empty required field '{field}': {row}")
+                return False
+        
+        # Check that optional fields are present (but can be empty)
+        for field in optional_fields:
+            if field not in row:
+                logger.warning(f"Invalid products row - missing optional field '{field}': {row}")
+                return False
         
         # Validate data types
         try:

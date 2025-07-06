@@ -1,5 +1,5 @@
 # Option 1: Use official Spark base image
-FROM apache/spark-py:v3.4.1
+FROM apache/spark-py
 
 # Switch to root for installations
 USER root

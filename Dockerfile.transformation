@@ -1,21 +1,17 @@
-FROM python:3.9-slim
+# Option 1: Use official Spark base image
+FROM apache/spark-py:v3.4.1
 
-# Install Java (required for Spark) and other dependencies
+# Switch to root for installations
+USER root
+
+# Install additional dependencies
 RUN apt-get update && apt-get install -y \
-    openjdk-17-jre-headless \
     curl \
     procps \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
-
-# Download and install Spark
-ARG SPARK_VERSION=3.4.1
-RUN curl -L -o spark.tgz https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop3.tgz && \
-    tar -xzf spark.tgz -C /usr/local/ && \
-    rm spark.tgz && \
-    ln -s /usr/local/spark-${SPARK_VERSION}-bin-hadoop3 /usr/local/spark
 
 # Copy requirements and install Python dependencies
 COPY requirements.txt .
@@ -25,20 +21,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src/transformation/transform.py .
 
 # Set environment variables
-ENV SPARK_HOME=/usr/local/spark
-ENV PATH=$PATH:$SPARK_HOME/bin:$SPARK_HOME/sbin
-ENV PYSPARK_PYTHON=python3
-ENV PYSPARK_DRIVER_PYTHON=python3
-ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-
-# Set Spark configuration for containerized environment
-ENV SPARK_CONF_DIR=$SPARK_HOME/conf
 ENV SPARK_LOCAL_IP=127.0.0.1
 
-# Create spark user (optional but recommended for production)
-# RUN useradd -r -s /bin/false spark && \
-#     chown -R spark:spark $SPARK_HOME && \
-#     chown -R spark:spark /app
+# Switch back to default user (if applicable, adjust based on base image)
+# USER ${SPARK_USER:-spark}  # Uncomment and adjust if needed
 
-# Command to run the script (made more flexible)
+# Command to run the script
 ENTRYPOINT ["python", "transform.py"]

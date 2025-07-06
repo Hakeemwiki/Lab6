@@ -14,14 +14,13 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Add Delta Lake and Hadoop AWS JARs
-ADD https://repo1.maven.org/maven2/io/delta/delta-spark_2.12/3.3.2/delta-spark_2.12-3.3.2.jar /opt/bitnami/spark/jars/
+# Add Delta Lake (compatible with Spark 3.4.x) and AWS JARs
+ADD https://repo1.maven.org/maven2/io/delta/delta-spark_2.12/3.2.0/delta-spark_2.12-3.2.0.jar /opt/bitnami/spark/jars/
 ADD https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.2/hadoop-aws-3.3.2.jar /opt/bitnami/spark/jars/
 ADD https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.11.1026/aws-java-sdk-bundle-1.11.1026.jar /opt/bitnami/spark/jars/
 
 # Copy Spark transformation script
 COPY src/transformation/transform.py .
 
-# Run using spark-submit with Delta Lake config
-# Spark submit with proper S3 config
+# Run using spark-submit with Delta Lake and S3 config
 CMD ["spark-submit","--conf", "spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension","--conf", "spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog","--conf", "spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem","--conf", "spark.hadoop.fs.s3a.aws.credentials.provider=com.amazonaws.auth.DefaultAWSCredentialsProviderChain","transform.py","s3a://lab6-ecommerce-shop/incoming/orders_*.csv","s3a://lab6-ecommerce-shop/incoming/order_items_*.csv","s3a://lab6-ecommerce-shop/incoming/products.csv"]

@@ -2,6 +2,7 @@ import sys
 import logging
 import os
 import boto3
+from datetime import datetime
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, avg, sum as _sum, when, count, countDistinct, to_date
 from pyspark.sql.types import IntegerType, FloatType
@@ -13,7 +14,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 def create_spark_session():
-    """Create Spark session with Delta Lake support."""
     try:
         builder = SparkSession.builder \
             .appName("ECommerceTransformation") \
@@ -38,7 +38,6 @@ def create_spark_session():
         raise
 
 def create_dynamodb_tables():
-    """Create DynamoDB tables for KPIs."""
     dynamodb_client = boto3.client('dynamodb')
     tables = [
         {
@@ -87,7 +86,6 @@ def transform_files(orders_path, order_items_path, products_path):
         create_dynamodb_tables()
 
         logger.info("Reading CSV files from S3...")
-
         orders_df = spark.read.option("header", "true").option("inferSchema", "true").csv(orders_path)
         order_items_df = spark.read.option("header", "true").option("inferSchema", "true").csv(order_items_path)
         products_df = spark.read.option("header", "true").option("inferSchema", "true").csv(products_path)
@@ -96,7 +94,7 @@ def transform_files(orders_path, order_items_path, products_path):
         logger.info(f"Order items schema: {order_items_df.columns}")
         logger.info(f"Products schema: {products_df.columns}")
 
-        # Cast columns
+        # Cast and rename
         orders_df = orders_df.withColumn("order_id", col("order_id").cast(IntegerType())) \
                              .withColumn("user_id", col("user_id").cast(IntegerType())) \
                              .withColumn("num_of_item", col("num_of_item").cast(IntegerType())) \
@@ -111,7 +109,7 @@ def transform_files(orders_path, order_items_path, products_path):
                                  .withColumn("cost", col("cost").cast(FloatType())) \
                                  .withColumn("retail_price", col("retail_price").cast(FloatType()))
 
-        # 🔁 Rename columns in order_items and products to avoid duplication
+        # Rename to avoid duplicates
         order_items_df = order_items_df \
             .withColumnRenamed("status", "item_status") \
             .withColumnRenamed("created_at", "item_created_at") \
@@ -126,7 +124,6 @@ def transform_files(orders_path, order_items_path, products_path):
             .withColumnRenamed("created_at", "product_created_at")
 
         logger.info("Joining datasets...")
-
         orders_items_df = orders_df.join(order_items_df, "order_id", "inner")
         joined_df = orders_items_df.join(products_df, orders_items_df.product_id == products_df.product_id_ref, "left")
 
@@ -135,18 +132,12 @@ def transform_files(orders_path, order_items_path, products_path):
 
         logger.info(f"Joined dataset has {joined_df.count()} rows")
 
-        # Write to Delta Lake
         delta_path = f"s3a://{os.environ.get('S3_INPUT_BUCKET', 'lab6-ecommerce-shop')}/processed/"
         logger.info(f"Writing to Delta table at {delta_path}")
-
-        joined_df.write.format("delta") \
-            .partitionBy("order_date") \
-            .mode("append") \
-            .save(delta_path)
-
+        joined_df.write.format("delta").partitionBy("order_date").mode("append").save(delta_path)
         logger.info("Processed data written to Delta table")
 
-        # KPI: Category Level
+        # KPIs
         logger.info("Computing category-level KPIs...")
         category_kpis = joined_df.groupBy("category", "order_date").agg(
             _sum("sale_price").alias("daily_revenue"),
@@ -154,7 +145,6 @@ def transform_files(orders_path, order_items_path, products_path):
             (avg(when(col("is_returned") == 1, 1.0).otherwise(0.0)) * 100).alias("avg_return_rate")
         ).na.fill(0)
 
-        # KPI: Order Level
         logger.info("Computing order-level KPIs...")
         order_kpis = joined_df.groupBy("order_date").agg(
             countDistinct("order_id").alias("total_orders"),
@@ -164,9 +154,8 @@ def transform_files(orders_path, order_items_path, products_path):
             countDistinct("user_id").alias("unique_customers")
         ).na.fill(0)
 
-        # Write KPIs to DynamoDB
+        # DynamoDB
         logger.info("Writing KPIs to DynamoDB...")
-
         dynamodb = boto3.resource('dynamodb')
         category_table = dynamodb.Table(os.environ['CATEGORY_KPI_TABLE'])
         order_table = dynamodb.Table(os.environ['ORDER_KPI_TABLE'])
@@ -195,6 +184,24 @@ def transform_files(orders_path, order_items_path, products_path):
                 })
             except Exception as e:
                 logger.error(f"Failed to write order KPI: {row}, error: {e}")
+
+        # ✅ Archive incoming files to timestamped folder
+        logger.info("Archiving processed files...")
+        s3 = boto3.resource("s3")
+        bucket_name = os.environ.get('S3_INPUT_BUCKET', 'lab6-ecommerce-shop')
+        archive_date = datetime.utcnow().strftime("%Y-%m-%d")
+        bucket = s3.Bucket(bucket_name)
+
+        for obj in bucket.objects.filter(Prefix="incoming/"):
+            key = obj.key
+            if any(prefix in key for prefix in ["orders_", "order_items_", "products.csv"]):
+                archive_key = key.replace("incoming/", f"archive/{archive_date}/", 1)
+                try:
+                    s3.Object(bucket_name, archive_key).copy_from(CopySource=f"{bucket_name}/{key}")
+                    s3.Object(bucket_name, key).delete()
+                    logger.info(f"Archived: {key} → {archive_key}")
+                except Exception as e:
+                    logger.error(f"Failed to archive {key}: {str(e)}")
 
         logger.info("Transformation completed successfully")
 

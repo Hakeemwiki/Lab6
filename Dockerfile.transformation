@@ -1,29 +1,27 @@
-# Use official Spark with PySpark base image
-FROM apache/spark-py:v3.4.0
+# Use Bitnami Spark image which includes PySpark and proper paths
+FROM bitnami/spark:3.4.1
 
-# Switch to root for installations
+# Switch to root for tool installation
 USER root
 
-# Install basic tools and ensure python3 is available as 'python'
-RUN apt-get update && apt-get install -y \
-    curl \
-    procps \
-    && ln -s /usr/bin/python3 /usr/bin/python \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+# Install tools and Python alias
+RUN apt-get update && apt-get install -y curl procps && ln -s /usr/bin/python3 /usr/bin/python
 
 # Set working directory
 WORKDIR /app
 
-# Copy and install Python dependencies
+# Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Add JARs to Spark classpath (!!! UPDATE PATH HERE !!!)
+# Add Delta Lake and Hadoop AWS JARs
 ADD https://repo1.maven.org/maven2/io/delta/delta-spark_2.12/3.3.2/delta-spark_2.12-3.3.2.jar /opt/bitnami/spark/jars/
 ADD https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.2/hadoop-aws-3.3.2.jar /opt/bitnami/spark/jars/
 ADD https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.11.1026/aws-java-sdk-bundle-1.11.1026.jar /opt/bitnami/spark/jars/
 
-# Copy transformation script
+# Copy Spark transformation script
 COPY src/transformation/transform.py .
+
 # Run using spark-submit with Delta Lake config
-CMD ["spark-submit","--conf", "spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension","--conf", "spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog","transform.py","s3a://lab6-ecommerce-shop/incoming/orders_*.csv","s3a://lab6-ecommerce-shop/incoming/order_items_*.csv","s3a://lab6-ecommerce-shop/incoming/products.csv"]
+# Spark submit with proper S3 config
+CMD ["spark-submit","--conf", "spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension","--conf", "spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog","--conf", "spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem","--conf", "spark.hadoop.fs.s3a.aws.credentials.provider=com.amazonaws.auth.DefaultAWSCredentialsProviderChain","transform.py","s3a://lab6-ecommerce-shop/incoming/orders_*.csv","s3a://lab6-ecommerce-shop/incoming/order_items_*.csv","s3a://lab6-ecommerce-shop/incoming/products.csv"]

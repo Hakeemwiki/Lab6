@@ -194,30 +194,48 @@ def transform_files(orders_path, order_items_path, products_path):
         category_table = dynamodb.Table(os.environ['CATEGORY_KPI_TABLE'])
         order_table = dynamodb.Table(os.environ['ORDER_KPI_TABLE'])
 
+        # CONDITIONAL UPSERT FOR CATEGORY KPIs
         for row in category_kpis.collect():
             try:
-                category_table.put_item(Item={
+                key = {
                     'category': str(row['category']) if row['category'] else 'unknown',
-                    'order_date': str(row['order_date']),
+                    'order_date': str(row['order_date'])
+                }
+                new_item = {
+                    **key,
                     'daily_revenue': Decimal(str(row['daily_revenue'])),
                     'avg_order_value': Decimal(str(row['avg_order_value'])),
                     'avg_return_rate': Decimal(str(row['avg_return_rate']))
-                })
+                }
+                existing = category_table.get_item(Key=key).get("Item")
+                if not existing or any(existing.get(k) != v for k, v in new_item.items()):
+                    category_table.put_item(Item=new_item)
+                    logger.info(f"Upserted category KPI: {key}")
+                else:
+                    logger.info(f"No changes in category KPI: {key}")
             except Exception as e:
-                logger.error(f"Failed to write category KPI: {row}, error: {e}")
+                logger.error(f"Failed to upsert category KPI: {row}, error: {e}")
 
+        # CONDITIONAL UPSERT FOR ORDER KPIs
         for row in order_kpis.collect():
             try:
-                order_table.put_item(Item={
-                    'order_date': str(row['order_date']),
+                key = {'order_date': str(row['order_date'])}
+                new_item = {
+                    **key,
                     'total_orders': int(row['total_orders']),
                     'total_revenue': Decimal(str(row['total_revenue'])),
                     'total_items_sold': int(row['total_items_sold']),
                     'return_rate': Decimal(str(row['return_rate'])),
                     'unique_customers': int(row['unique_customers'])
-                })
+                }
+                existing = order_table.get_item(Key=key).get("Item")
+                if not existing or any(existing.get(k) != v for k, v in new_item.items()):
+                    order_table.put_item(Item=new_item)
+                    logger.info(f"Upserted order KPI: {key}")
+                else:
+                    logger.info(f"No changes in order KPI: {key}")
             except Exception as e:
-                logger.error(f"Failed to write order KPI: {row}, error: {e}")
+                logger.error(f"Failed to upsert order KPI: {row}, error: {e}")
 
         logger.info("Transformation completed successfully")
 
